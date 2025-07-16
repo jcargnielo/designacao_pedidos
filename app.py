@@ -121,7 +121,7 @@ def atualizar_status_pedido(id_pedido, novo_status):
 # TELAS DO SISTEMA
 # ============================================
 def tela_login():
-    st.title("🔐 Sistema de Pedidos - Login")
+    st.title("🔐 Teste")
     
     with st.form("form_login"):
         username = st.text_input("Usuário")
