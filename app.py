@@ -4,6 +4,7 @@ import hashlib
 import os
 from datetime import datetime
 from io import BytesIO
+from time import time
 
 # ============================================
 # CONFIGURAÇÕES INICIAIS
@@ -12,6 +13,7 @@ DB_PEDIDOS = "pedidos.csv"
 DB_USUARIOS = "usuarios.csv"
 COLUNAS_PEDIDOS = ["ID", "Pedido", "Funcionário", "Status", "Data Início", "Data Conclusão"]
 COLUNAS_USUARIOS = ["username", "password", "role", "nome_completo"]
+TIMEOUT_MINUTOS = 30  # Tempo de inatividade para logout automático
 
 # Cores para os status
 CORES_STATUS = {
@@ -118,6 +120,22 @@ def atualizar_status_pedido(id_pedido, novo_status):
     return False
 
 # ============================================
+# FUNÇÕES AUXILIARES
+# ============================================
+def darken_color(hex_color, factor=0.2):
+    """Escurece uma cor HEX pelo fator especificado"""
+    hex_color = hex_color.lstrip('#')
+    rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    rgb = [int(x * (1 - factor)) for x in rgb]
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Pedidos')
+    return output.getvalue()
+
+# ============================================
 # TELAS DO SISTEMA
 # ============================================
 def tela_login():
@@ -131,6 +149,7 @@ def tela_login():
             login = verificar_login(username, senha)
             if login["autenticado"]:
                 st.session_state.update(login)
+                st.session_state.last_activity = time()  # Registrar atividade ao logar
                 st.rerun()
             else:
                 st.error("Credenciais inválidas")
@@ -285,6 +304,7 @@ def tela_pedidos_lider():
             if num_pedido and num_pedido.isdigit():
                 adicionar_pedido(int(num_pedido), funcionario)
                 st.success("Pedido adicionado!")
+                st.toast(f"Novo pedido #{num_pedido} criado para {funcionario}!", icon="🎉")  # Alerta pop-up
                 st.rerun()
             else:
                 st.error("Número de pedido inválido")
@@ -307,21 +327,23 @@ def tela_pedidos_lider():
     if filtro_status != "Todos":
         pedidos_df = pedidos_df[pedidos_df["Status"] == filtro_status]
 
-    # Botão exportar
-    def to_excel(df):
-        # Criar cópia sem a coluna "Data Designação"
-        df_export = df.drop(columns=["Data Designação"], errors='ignore')
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_export.to_excel(writer, index=False, sheet_name='Pedidos')
-        return output.getvalue()
-
-    st.download_button(
-        label="📥 Baixar Relatório Completo",
-        data=to_excel(pedidos_df),
-        file_name='relatorio_pedidos.xlsx',
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+    # Botões exportar
+    st.write("")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            label="📥 Baixar Relatório Completo (Excel)",
+            data=to_excel(pedidos_df),
+            file_name='relatorio_pedidos.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+    with col2:
+        st.download_button(
+            label="📥 Baixar Relatório Completo (CSV)",
+            data=pedidos_df.to_csv(index=False).encode('utf-8'),
+            file_name='relatorio_pedidos.csv',
+            mime='text/csv'
+        )
 
     st.subheader("📝 Todos os Pedidos")
 
@@ -329,7 +351,6 @@ def tela_pedidos_lider():
         for _, row in pedidos_df.iterrows():
             cor_status = CORES_STATUS.get(row["Status"], "#FFFFFF")
             
-            # Container principal com cor de fundo
             with st.container():
                 st.markdown(
                     f'<div style="background-color:{cor_status}; padding:12px; border-radius:10px; margin-bottom:15px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">'
@@ -341,7 +362,6 @@ def tela_pedidos_lider():
                     unsafe_allow_html=True
                 )
                 
-                # Detalhes expandíveis
                 with st.expander("🔍 Ver detalhes", expanded=False):
                     st.markdown(
                         f'<div style="padding:8px;">'
@@ -351,7 +371,6 @@ def tela_pedidos_lider():
                         unsafe_allow_html=True
                     )
                     
-                    # Controles de edição
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         novo_funcionario = st.selectbox(
@@ -390,13 +409,14 @@ def tela_pedidos_lider():
 def tela_pedidos_funcionario():
     st.title(f"📋 Meus Pedidos - {st.session_state['nome_completo']}")
     pedidos_df = carregar_pedidos()
-    meus_pedidos = pedidos_df[pedidos_df["Funcionário"] == st.session_state["nome_completo"]]
+    # Alteração: filtrar pedidos não concluídos
+    meus_pedidos = pedidos_df[(pedidos_df["Funcionário"] == st.session_state["nome_completo"]) & 
+                             (pedidos_df["Status"] != "Concluído")]
     
     if not meus_pedidos.empty:
         for _, row in meus_pedidos.iterrows():
             cor_status = CORES_STATUS.get(row["Status"], "#FFFFFF")
             
-            # Container principal com cor de fundo
             with st.container():
                 st.markdown(
                     f'<div style="background-color:{cor_status}; padding:12px; border-radius:10px; margin-bottom:15px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">'
@@ -407,7 +427,6 @@ def tela_pedidos_funcionario():
                     unsafe_allow_html=True
                 )
                 
-                # Detalhes expandíveis
                 with st.expander("🔍 Ver detalhes", expanded=False):
                     st.markdown(
                         f'<div style="padding:8px;">'
@@ -417,7 +436,6 @@ def tela_pedidos_funcionario():
                         unsafe_allow_html=True
                     )
                     
-                    # Botões de ação
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         if st.button("▶️ Iniciar", key=f"iniciar_{row['ID']}"):
@@ -448,17 +466,12 @@ def tela_pedidos_funcionario():
     else:
         st.info("Nenhum pedido atribuído a você")
 
-# Função auxiliar para escurecer cor (adicionar no início do código)
-def darken_color(hex_color, factor=0.2):
-    """Escurece uma cor HEX pelo fator especificado"""
-    hex_color = hex_color.lstrip('#')
-    rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    rgb = [int(x * (1 - factor)) for x in rgb]
-    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-
 def tela_principal():
     st.sidebar.title(f"👋 Olá, {st.session_state['nome_completo']}")
     st.sidebar.subheader(f"Perfil: {'Líder' if st.session_state['role'] == 'lider' else 'Funcionário'}")
+    
+    # Atualizar última atividade ao interagir com a sidebar
+    st.session_state.last_activity = time()
     
     if st.sidebar.button("🚪 Sair"):
         st.session_state.clear()
@@ -480,6 +493,16 @@ def tela_principal():
 def main():
     st.set_page_config(page_title="Sistema de Pedidos", layout="wide")
     inicializar_arquivos()
+    
+    # Verificar timeout de inatividade
+    if "last_activity" not in st.session_state:
+        st.session_state.last_activity = time()
+    else:
+        inactive_seconds = time() - st.session_state.last_activity
+        if inactive_seconds > TIMEOUT_MINUTOS * 60:
+            st.warning(f"Sessão encerrada após {TIMEOUT_MINUTOS} minutos de inatividade")
+            st.session_state.clear()
+            st.rerun()
     
     if "autenticado" not in st.session_state:
         st.session_state["autenticado"] = False
