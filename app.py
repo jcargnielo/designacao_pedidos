@@ -22,6 +22,8 @@ if 'notificado' not in st.session_state:
     st.session_state.notificado = False
 if 'last_activity' not in st.session_state:
     st.session_state.last_activity = time()
+if 'autenticado' not in st.session_state:
+    st.session_state.autenticado = False
 
 # Cores para os status
 CORES_STATUS = {
@@ -70,14 +72,14 @@ def verificar_login(username, senha):
     if not usuario.empty:
         hashed_pw = hashlib.sha256(senha.encode()).hexdigest()
         if usuario.iloc[0]["password"] == hashed_pw:
-            st.session_state.last_activity = time()  # Resetar atividade ao logar
+            st.session_state.last_activity = time()
+            st.session_state.autenticado = True
             return {
-                "autenticado": True,
                 "username": username,
                 "role": usuario.iloc[0]["role"],
                 "nome_completo": usuario.iloc[0]["nome_completo"]
             }
-    return {"autenticado": False}
+    return None
 
 # ============================================
 # FUNÇÕES DE PEDIDOS
@@ -109,7 +111,6 @@ def adicionar_pedido(num_pedido, funcionario):
     df = pd.concat([df, novo_pedido], ignore_index=True)
     salvar_pedidos(df)
     
-    # Atualiza o último pedido adicionado para notificação
     st.session_state.ultimo_pedido = {
         "numero": num_pedido,
         "funcionario": funcionario,
@@ -140,7 +141,6 @@ def atualizar_status_pedido(id_pedido, novo_status):
 # FUNÇÕES AUXILIARES
 # ============================================
 def darken_color(hex_color, factor=0.2):
-    """Escurece uma cor HEX pelo fator especificado"""
     hex_color = hex_color.lstrip('#')
     rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     rgb = [int(x * (1 - factor)) for x in rgb]
@@ -163,16 +163,16 @@ def tela_login():
         senha = st.text_input("Senha", type="password")
         
         if st.form_submit_button("Entrar"):
-            login = verificar_login(username, senha)
-            if login["autenticado"]:
-                st.session_state.update(login)
+            usuario = verificar_login(username, senha)
+            if usuario:
+                st.session_state.update(usuario)
                 st.rerun()
             else:
                 st.error("Credenciais inválidas")
 
 def tela_gerenciar_usuarios():
     st.title("👥 Gerenciamento de Usuários")
-    st.session_state.last_activity = time()  # Registrar atividade
+    st.session_state.last_activity = time()
     
     usuarios_df = carregar_usuarios()
     usuarios_lista = usuarios_df["username"].tolist()
@@ -308,7 +308,7 @@ def tela_gerenciar_usuarios():
 
 def tela_pedidos_lider():
     st.title("📋 Gerenciamento de Pedidos")
-    st.session_state.last_activity = time()  # Registrar atividade
+    st.session_state.last_activity = time()
 
     with st.expander("➕ Novo Pedido", expanded=True):
         col1, col2 = st.columns(2)
@@ -342,7 +342,6 @@ def tela_pedidos_lider():
     if filtro_status != "Todos":
         pedidos_df = pedidos_df[pedidos_df["Status"] == filtro_status]
 
-    # Botões exportar
     st.write("")
     col1, col2 = st.columns(2)
     with col1:
@@ -422,7 +421,12 @@ def tela_pedidos_lider():
         st.info("Nenhum pedido encontrado com os filtros selecionados.")
 
 def tela_pedidos_funcionario():
-    # Verifica se há novos pedidos para este funcionário
+    # Botão para atualizar pedidos
+    if st.button("🔄 Atualizar Pedidos", key="btn_atualizar_pedidos"):
+        st.session_state.notificado = False  # Permite mostrar notificações novamente
+        st.rerun()
+    
+    # Verifica novos pedidos
     if (st.session_state.ultimo_pedido and 
         st.session_state.ultimo_pedido["funcionario"] == st.session_state["nome_completo"] and
         not st.session_state.notificado):
@@ -439,7 +443,7 @@ def tela_pedidos_funcionario():
         unsafe_allow_html=True
     )
     
-    st.session_state.last_activity = time()  # Registrar atividade
+    st.session_state.last_activity = time()
     
     pedidos_df = carregar_pedidos()
     meus_pedidos = pedidos_df[(pedidos_df["Funcionário"] == st.session_state["nome_completo"]) & 
@@ -502,7 +506,6 @@ def tela_principal():
     st.sidebar.title(f"👋 Olá, {st.session_state['nome_completo']}")
     st.sidebar.subheader(f"Perfil: {'Líder' if st.session_state['role'] == 'lider' else 'Funcionário'}")
     
-    # Atualiza atividade apenas em interações reais
     if st.sidebar.button("🚪 Sair"):
         st.session_state.clear()
         st.rerun()
@@ -532,10 +535,7 @@ def main():
             st.session_state.clear()
             st.rerun()
     
-    if "autenticado" not in st.session_state:
-        st.session_state["autenticado"] = False
-    
-    if not st.session_state["autenticado"]:
+    if not st.session_state.get("autenticado", False):
         tela_login()
     else:
         tela_principal()
