@@ -15,11 +15,13 @@ COLUNAS_PEDIDOS = ["ID", "Pedido", "Funcionário", "Status", "Data Início", "Da
 COLUNAS_USUARIOS = ["username", "password", "role", "nome_completo"]
 TIMEOUT_MINUTOS = 30
 
-# Variável global para notificações
+# Variáveis de sessão
 if 'ultimo_pedido' not in st.session_state:
     st.session_state.ultimo_pedido = None
 if 'notificado' not in st.session_state:
     st.session_state.notificado = False
+if 'last_activity' not in st.session_state:
+    st.session_state.last_activity = time()
 
 # Cores para os status
 CORES_STATUS = {
@@ -68,6 +70,7 @@ def verificar_login(username, senha):
     if not usuario.empty:
         hashed_pw = hashlib.sha256(senha.encode()).hexdigest()
         if usuario.iloc[0]["password"] == hashed_pw:
+            st.session_state.last_activity = time()  # Resetar atividade ao logar
             return {
                 "autenticado": True,
                 "username": username,
@@ -163,13 +166,13 @@ def tela_login():
             login = verificar_login(username, senha)
             if login["autenticado"]:
                 st.session_state.update(login)
-                st.session_state.last_activity = time()
                 st.rerun()
             else:
                 st.error("Credenciais inválidas")
 
 def tela_gerenciar_usuarios():
     st.title("👥 Gerenciamento de Usuários")
+    st.session_state.last_activity = time()  # Registrar atividade
     
     usuarios_df = carregar_usuarios()
     usuarios_lista = usuarios_df["username"].tolist()
@@ -305,6 +308,7 @@ def tela_gerenciar_usuarios():
 
 def tela_pedidos_lider():
     st.title("📋 Gerenciamento de Pedidos")
+    st.session_state.last_activity = time()  # Registrar atividade
 
     with st.expander("➕ Novo Pedido", expanded=True):
         col1, col2 = st.columns(2)
@@ -435,6 +439,8 @@ def tela_pedidos_funcionario():
         unsafe_allow_html=True
     )
     
+    st.session_state.last_activity = time()  # Registrar atividade
+    
     pedidos_df = carregar_pedidos()
     meus_pedidos = pedidos_df[(pedidos_df["Funcionário"] == st.session_state["nome_completo"]) & 
                              (pedidos_df["Status"] != "Concluído")]
@@ -496,8 +502,7 @@ def tela_principal():
     st.sidebar.title(f"👋 Olá, {st.session_state['nome_completo']}")
     st.sidebar.subheader(f"Perfil: {'Líder' if st.session_state['role'] == 'lider' else 'Funcionário'}")
     
-    st.session_state.last_activity = time()
-    
+    # Atualiza atividade apenas em interações reais
     if st.sidebar.button("🚪 Sair"):
         st.session_state.clear()
         st.rerun()
@@ -519,9 +524,8 @@ def main():
     st.set_page_config(page_title="Sistema de Pedidos", layout="wide")
     inicializar_arquivos()
     
-    if "last_activity" not in st.session_state:
-        st.session_state.last_activity = time()
-    else:
+    # Verifica timeout apenas se autenticado
+    if st.session_state.get("autenticado", False):
         inactive_seconds = time() - st.session_state.last_activity
         if inactive_seconds > TIMEOUT_MINUTOS * 60:
             st.warning(f"Sessão encerrada após {TIMEOUT_MINUTOS} minutos de inatividade")
