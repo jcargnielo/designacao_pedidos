@@ -93,7 +93,6 @@ def adicionar_pedido(num_pedido, funcionario):
         funcionario,
         "Pendente",
         datetime.now().strftime("%d/%m/%Y %H:%M"),
-        "",
         ""
     ]], columns=COLUNAS_PEDIDOS)
     df = pd.concat([df, novo_pedido], ignore_index=True)
