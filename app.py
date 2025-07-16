@@ -13,14 +13,20 @@ DB_PEDIDOS = "pedidos.csv"
 DB_USUARIOS = "usuarios.csv"
 COLUNAS_PEDIDOS = ["ID", "Pedido", "Funcionário", "Status", "Data Início", "Data Conclusão"]
 COLUNAS_USUARIOS = ["username", "password", "role", "nome_completo"]
-TIMEOUT_MINUTOS = 30  # Tempo de inatividade para logout automático
+TIMEOUT_MINUTOS = 30
+
+# Variável global para notificações
+if 'ultimo_pedido' not in st.session_state:
+    st.session_state.ultimo_pedido = None
+if 'notificado' not in st.session_state:
+    st.session_state.notificado = False
 
 # Cores para os status
 CORES_STATUS = {
-    "Pendente": "#FFCDD2",  # Vermelho claro
-    "Em andamento": "#E0E0E0",  # Cinza
-    "Pausado": "#FFF9C4",  # Amarelo claro
-    "Concluído": "#C8E6C9"  # Verde claro
+    "Pendente": "#FFCDD2",
+    "Em andamento": "#E0E0E0",
+    "Pausado": "#FFF9C4",
+    "Concluído": "#C8E6C9"
 }
 
 # ============================================
@@ -99,6 +105,14 @@ def adicionar_pedido(num_pedido, funcionario):
     ]], columns=COLUNAS_PEDIDOS)
     df = pd.concat([df, novo_pedido], ignore_index=True)
     salvar_pedidos(df)
+    
+    # Atualiza o último pedido adicionado para notificação
+    st.session_state.ultimo_pedido = {
+        "numero": num_pedido,
+        "funcionario": funcionario,
+        "timestamp": time()
+    }
+    st.session_state.notificado = False
 
 def atualizar_status_pedido(id_pedido, novo_status):
     df = carregar_pedidos()
@@ -149,7 +163,7 @@ def tela_login():
             login = verificar_login(username, senha)
             if login["autenticado"]:
                 st.session_state.update(login)
-                st.session_state.last_activity = time()  # Registrar atividade ao logar
+                st.session_state.last_activity = time()
                 st.rerun()
             else:
                 st.error("Credenciais inválidas")
@@ -292,7 +306,6 @@ def tela_gerenciar_usuarios():
 def tela_pedidos_lider():
     st.title("📋 Gerenciamento de Pedidos")
 
-    # Adicionar novo pedido
     with st.expander("➕ Novo Pedido", expanded=True):
         col1, col2 = st.columns(2)
         num_pedido = col1.text_input("Número do Pedido*", key="novo_pedido_num")
@@ -304,12 +317,10 @@ def tela_pedidos_lider():
             if num_pedido and num_pedido.isdigit():
                 adicionar_pedido(int(num_pedido), funcionario)
                 st.success("Pedido adicionado!")
-                st.toast(f"Novo pedido #{num_pedido} criado para {funcionario}!", icon="🎉")  # Alerta pop-up
                 st.rerun()
             else:
                 st.error("Número de pedido inválido")
 
-    # Filtros
     st.subheader("🔍 Filtros Avançados")
     pedidos_df = carregar_pedidos()
     
@@ -407,9 +418,24 @@ def tela_pedidos_lider():
         st.info("Nenhum pedido encontrado com os filtros selecionados.")
 
 def tela_pedidos_funcionario():
-    st.title(f"📋 Meus Pedidos - {st.session_state['nome_completo']}")
+    # Verifica se há novos pedidos para este funcionário
+    if (st.session_state.ultimo_pedido and 
+        st.session_state.ultimo_pedido["funcionario"] == st.session_state["nome_completo"] and
+        not st.session_state.notificado):
+        
+        st.toast(
+            f"📢 Novo pedido #{st.session_state.ultimo_pedido['numero']} atribuído a você!",
+            icon="⚠️"
+        )
+        st.session_state.notificado = True
+    
+    # Título com fonte menor
+    st.markdown(
+        f'<h1 style="font-size:22px;">📋 Meus Pedidos - {st.session_state["nome_completo"]}</h1>',
+        unsafe_allow_html=True
+    )
+    
     pedidos_df = carregar_pedidos()
-    # Alteração: filtrar pedidos não concluídos
     meus_pedidos = pedidos_df[(pedidos_df["Funcionário"] == st.session_state["nome_completo"]) & 
                              (pedidos_df["Status"] != "Concluído")]
     
@@ -420,7 +446,7 @@ def tela_pedidos_funcionario():
             with st.container():
                 st.markdown(
                     f'<div style="background-color:{cor_status}; padding:12px; border-radius:10px; margin-bottom:15px; box-shadow:0 2px 4px rgba(0,0,0,0.1);">'
-                    f'<div style="font-size:18px; font-weight:bold; margin-bottom:8px;">Pedido #{row["Pedido"]}</div>'
+                    f'<div style="font-size:16px; font-weight:bold; margin-bottom:8px;">Pedido #{row["Pedido"]}</div>'
                     f'<div style="display:flex; justify-content:space-between; margin-bottom:10px;">'
                     f'<span>Status: {row["Status"]}</span>'
                     f'</div>',
@@ -470,7 +496,6 @@ def tela_principal():
     st.sidebar.title(f"👋 Olá, {st.session_state['nome_completo']}")
     st.sidebar.subheader(f"Perfil: {'Líder' if st.session_state['role'] == 'lider' else 'Funcionário'}")
     
-    # Atualizar última atividade ao interagir com a sidebar
     st.session_state.last_activity = time()
     
     if st.sidebar.button("🚪 Sair"):
@@ -494,7 +519,6 @@ def main():
     st.set_page_config(page_title="Sistema de Pedidos", layout="wide")
     inicializar_arquivos()
     
-    # Verificar timeout de inatividade
     if "last_activity" not in st.session_state:
         st.session_state.last_activity = time()
     else:
