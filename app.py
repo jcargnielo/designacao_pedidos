@@ -5,10 +5,20 @@ import os
 from datetime import datetime
 from io import BytesIO
 from time import time
+from streamlit.components.v1 import html
+import uuid
 
 # ============================================
 # CONFIGURAÇÕES INICIAIS
 # ============================================
+# Configuração para persistência de sessão
+if 'persist' not in st.session_state:
+    st.session_state.persist = True
+
+# Gera um ID único de sessão se não existir
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
 DB_PEDIDOS = "pedidos.csv"
 DB_USUARIOS = "usuarios.csv"
 COLUNAS_PEDIDOS = ["ID", "Pedido", "Funcionário", "Status", "Data Início", "Data Conclusão"]
@@ -24,6 +34,8 @@ if 'last_activity' not in st.session_state:
     st.session_state.last_activity = time()
 if 'autenticado' not in st.session_state:
     st.session_state.autenticado = False
+if 'user_info' not in st.session_state:
+    st.session_state.user_info = None
 
 # Cores para os status
 CORES_STATUS = {
@@ -74,11 +86,12 @@ def verificar_login(username, senha):
         if usuario.iloc[0]["password"] == hashed_pw:
             st.session_state.last_activity = time()
             st.session_state.autenticado = True
-            return {
+            st.session_state.user_info = {
                 "username": username,
                 "role": usuario.iloc[0]["role"],
                 "nome_completo": usuario.iloc[0]["nome_completo"]
             }
+            return st.session_state.user_info
     return None
 
 # ============================================
@@ -165,7 +178,6 @@ def tela_login():
         if st.form_submit_button("Entrar"):
             usuario = verificar_login(username, senha)
             if usuario:
-                st.session_state.update(usuario)
                 st.rerun()
             else:
                 st.error("Credenciais inválidas")
@@ -428,7 +440,7 @@ def tela_pedidos_funcionario():
     
     # Verifica novos pedidos
     if (st.session_state.ultimo_pedido and 
-        st.session_state.ultimo_pedido["funcionario"] == st.session_state["nome_completo"] and
+        st.session_state.ultimo_pedido["funcionario"] == st.session_state.user_info["nome_completo"] and
         not st.session_state.notificado):
         
         st.toast(
@@ -439,14 +451,14 @@ def tela_pedidos_funcionario():
     
     # Título com fonte menor
     st.markdown(
-        f'<h1 style="font-size:22px;">📋 Meus Pedidos - {st.session_state["nome_completo"]}</h1>',
+        f'<h1 style="font-size:22px;">📋 Meus Pedidos - {st.session_state.user_info["nome_completo"]}</h1>',
         unsafe_allow_html=True
     )
     
     st.session_state.last_activity = time()
     
     pedidos_df = carregar_pedidos()
-    meus_pedidos = pedidos_df[(pedidos_df["Funcionário"] == st.session_state["nome_completo"]) & 
+    meus_pedidos = pedidos_df[(pedidos_df["Funcionário"] == st.session_state.user_info["nome_completo"]) & 
                              (pedidos_df["Status"] != "Concluído")]
     
     if not meus_pedidos.empty:
@@ -503,14 +515,20 @@ def tela_pedidos_funcionario():
         st.info("Nenhum pedido atribuído a você")
 
 def tela_principal():
-    st.sidebar.title(f"👋 Olá, {st.session_state['nome_completo']}")
-    st.sidebar.subheader(f"Perfil: {'Líder' if st.session_state['role'] == 'lider' else 'Funcionário'}")
+    st.sidebar.title(f"👋 Olá, {st.session_state.user_info['nome_completo']}")
+    st.sidebar.subheader(f"Perfil: {'Líder' if st.session_state.user_info['role'] == 'lider' else 'Funcionário'}")
     
     if st.sidebar.button("🚪 Sair"):
         st.session_state.clear()
+        js_logout = """
+        <script>
+        window.localStorage.clear();
+        </script>
+        """
+        html(js_logout)
         st.rerun()
     
-    if st.session_state["role"] == "lider":
+    if st.session_state.user_info["role"] == "lider":
         opcao = st.sidebar.radio("Menu", ["📋 Pedidos", "👥 Usuários"])
         
         if opcao == "📋 Pedidos":
@@ -527,18 +545,36 @@ def main():
     st.set_page_config(page_title="Sistema de Pedidos", layout="wide")
     inicializar_arquivos()
     
-    # Verifica timeout apenas se autenticado
+    # Verifica se já está autenticado
     if st.session_state.get("autenticado", False):
+        # Verifica timeout apenas se autenticado
         inactive_seconds = time() - st.session_state.last_activity
         if inactive_seconds > TIMEOUT_MINUTOS * 60:
             st.warning(f"Sessão encerrada após {TIMEOUT_MINUTOS} minutos de inatividade")
             st.session_state.clear()
             st.rerun()
-    
-    if not st.session_state.get("autenticado", False):
-        tela_login()
+        else:
+            tela_principal()
     else:
-        tela_principal()
+        tela_login()
+
+    # Script JavaScript para manter a sessão
+    js = """
+    <script>
+    // Armazena o session_id no localStorage
+    if (!window.localStorage.getItem('session_id')) {
+        window.localStorage.setItem('session_id', '%s');
+    }
+    
+    // Verifica se o session_id mudou (página recarregada em outra aba)
+    if (window.localStorage.getItem('session_id') !== '%s') {
+        window.localStorage.clear();
+        window.location.reload();
+    }
+    </script>
+    """ % (st.session_state.session_id, st.session_state.session_id)
+    
+    html(js)
 
 if __name__ == "__main__":
     main()
